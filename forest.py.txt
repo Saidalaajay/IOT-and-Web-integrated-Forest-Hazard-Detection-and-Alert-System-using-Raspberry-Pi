@@ -1,0 +1,113 @@
+#https://thingspeak.mathworks.com/channels/2846009
+import RPi.GPIO as GPIO
+import time
+import requests
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
+from picamera import PiCamera
+from I2C_LCD import LCD
+
+# GPIO Pin Setup
+TILT_SENSOR = 14
+GAS_SENSOR = 18
+FIRE_SENSOR = 15
+
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(TILT_SENSOR, GPIO.IN)
+GPIO.setup(GAS_SENSOR, GPIO.IN)
+GPIO.setup(FIRE_SENSOR, GPIO.IN)
+
+lcd = LCD()
+
+# ThingSpeak API
+THINGSPEAK_API_KEY = "KTYNJ62R8P1I5KXO"
+THINGSPEAK_URL = "https://api.thingspeak.com/update"
+
+# Email Setup
+EMAIL_SENDER = "vanamruby@gmail.com"
+EMAIL_RECEIVER = "gganesh.vmtw@gmail.com"
+EMAIL_PASSWORD = "your_password"
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+
+# Camera Setup
+camera = PiCamera()
+camera.resolution = (1024, 768)
+
+# Function to send email with image
+def send_email(image_path):
+    msg = MIMEMultipart()
+    msg['From'] = EMAIL_SENDER
+    msg['To'] = EMAIL_RECEIVER
+    msg['Subject'] = "Sensor Alert - Raspberry Pi"
+    
+    part = MIMEBase('application', 'octet-stream')
+    with open(image_path, 'rb') as attachment:
+        part.set_payload(attachment.read())
+    encoders.encode_base64(part)
+    part.add_header('Content-Disposition', f'attachment; filename={image_path}')
+    msg.attach(part)
+    
+    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+    server.starttls()
+    server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+    server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
+    server.quit()
+    
+# Function to update ThingSpeak
+def update_thingspeak(tilt, gas, fire):
+    data = {
+        'api_key': THINGSPEAK_API_KEY,
+        'field1': tilt,
+        'field2': gas,
+        'field3': fire
+    }
+    requests.get(THINGSPEAK_URL, params=data)
+    lcd.message("Data uploaded to", 1)
+    lcd.message("  ThingSpeak", 2)
+    time.sleep(1)
+
+lcd.clear()
+lcd.message("Forest Forecast", 1)
+lcd.message("Detection System", 2)
+time.sleep(1)
+lcd.clear()
+lcd.message("      using   ", 1)
+lcd.message("Raspberry Pi", 2)
+time.sleep(1)
+lcd.clear()
+
+# Main Loop
+try:
+    while True:
+        tilt_status = GPIO.input(TILT_SENSOR)
+        gas_status = GPIO.input(GAS_SENSOR)
+        fire_status = GPIO.input(FIRE_SENSOR)
+
+        lcd.message(f"Tilt:{tilt_status} Gas:{gas_status}", 1)
+        lcd.message(f"Fire:{fire_status}", 2)
+        update_thingspeak(tilt_status, gas_status, fire_status)
+
+        if tilt_status == 0 or gas_status == 0 or fire_status == 0:
+            lcd.message("Sensor Detected ", 1)
+            lcd.message("Image Capturing ", 2)
+            time.sleep(1)
+            image_path = "alert.jpg"
+            camera.capture(image_path)
+            time.sleep(1)
+            camera.close()
+            lcd.clear()
+            lcd.message("Image Captured..", 1)
+            lcd.message("Sending Mail", 2)
+            time.sleep(1)
+            send_email(image_path)
+            lcd.message("ALERT SENT!")
+            time.sleep(2)
+
+        time.sleep(2)
+
+except KeyboardInterrupt:
+    GPIO.cleanup()
+    print("Program Stopped")
